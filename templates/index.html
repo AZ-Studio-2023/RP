@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Nuitka 打包服务</title>
+    <link href="https://gcore.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://gcore.jsdelivr.net/npm/socket.io@4.0.0/client-dist/socket.io.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + '/test');
+            socket.on('output', function(data) {
+                var logElement = document.getElementById('log');
+                logElement.innerHTML += data.data + '<br>';
+                logElement.scrollTop = logElement.scrollHeight;  // 自动滚动到底部
+            });
+            socket.on('done', function(data) {
+                document.getElementById('log').innerHTML += '<a href="' + data.url + '">下载打包文件</a>';
+            });
+
+            // Load saved form data
+            document.querySelectorAll('input[type="text"], input[type="radio"]').forEach(input => {
+                const savedValue = localStorage.getItem(input.name);
+                if (savedValue) {
+                    if (input.type === 'radio') {
+                        if (input.value === savedValue) {
+                            input.checked = true;
+                        }
+                    } else {
+                        input.value = savedValue;
+                    }
+                }
+            });
+
+            // Handle form submission with AJAX
+            document.querySelector('form').addEventListener('submit', function(event) {
+                event.preventDefault();
+                var formData = new FormData(this);
+                fetch('/', {
+                    method: 'POST',
+                    body: formData
+                }).then(response => response.json())
+                  .then(data => console.log(data))
+                  .catch(error => console.error('Error:', error));
+
+                // Save form data
+                document.querySelectorAll('input[type="text"], input[type="radio"]:checked').forEach(input => {
+                    localStorage.setItem(input.name, input.value);
+                });
+            });
+        });
+    </script>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen">
+    <div class="w-full max-w-4xl p-5 bg-white rounded-lg shadow-lg">
+        <h1 class="text-2xl font-bold text-center mb-6">Nuitka 打包服务</h1>
+        <form method="post" class="space-y-6">
+            <div>
+                <label class="block text-gray-700">Git 项目地址:</label>
+                <input type="text" name="git_url" class="w-full mt-1 p-2 border rounded" required>
+            </div>
+            <div>
+                <label class="block text-gray-700">主文件:</label>
+                <input type="text" name="main_file" class="w-full mt-1 p-2 border rounded" required>
+            </div>
+            <div>
+                <label class="block text-gray-700">是否打包为单文件:</label>
+                <div class="mt-1">
+                    <label><input type="radio" name="single_file" value=true> 是</label>
+                    <label><input type="radio" name="single_file" value=false checked> 否</label>
+                </div>
+            </div>
+            <div>
+                <label class="block text-gray-700">是否隐藏控制台:</label>
+                <div class="mt-1">
+                    <label><input type="radio" name="no_console" value=true> 是</label>
+                    <label><input type="radio" name="no_console" value=false checked> 否</label>
+                </div>
+            </div>
+            <div>
+                <label class="block text-gray-700">Icon 路径 (可选):</label>
+                <input type="text" name="icon_path" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">requirements.txt 路径 (可选):</label>
+                <input type="text" name="requirements_path" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">资源文件夹名称 (可选):</label>
+                <input type="text" name="resource_folder" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">启用的插件 (可选):</label>
+                <input type="text" name="plugins" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">Windows 文件描述:</label>
+                <input type="text" name="windows_file_description" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">Windows 文件版本:</label>
+                <input type="text" name="windows_file_version" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">Windows 产品版本:</label>
+                <input type="text" name="windows_product_version" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">Windows 产品名称:</label>
+                <input type="text" name="windows_product_name" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">Windows 公司名称:</label>
+                <input type="text" name="windows_company_name" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">包含的包 (逗号分隔):</label>
+                <input type="text" name="include_package" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">包含的模块 (逗号分隔):</label>
+                <input type="text" name="include_module" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-gray-700">自定义参数 (逗号分隔):</label>
+                <input type="text" name="custom_args" class="w-full mt-1 p-2 border rounded">
+            </div>
+            <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-700">开始打包</button>
+        </form>
+        <div id="log" class="mt-6 p-4 bg-gray-200 rounded-lg h-64 overflow-auto"></div>
+    </div>
+</body>
+</html> 
