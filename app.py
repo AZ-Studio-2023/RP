@@ -1,6 +1,5 @@
 from flask import Flask, request, render_template, jsonify, redirect, url_for, send_from_directory
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user
-from flask_socketio import SocketIO, emit
 import subprocess
 import threading
 import os
@@ -8,15 +7,20 @@ import zipfile
 import schedule
 import time
 import uuid
+import shutil
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
-socketio = SocketIO(app)
 
 # 设置项目和打包结果的保存位置
 BASE_DIR = '/path/to/base/dir'
 REPO_DIR = os.path.join(BASE_DIR, 'repo')
 OUTPUT_DIR = os.path.join(BASE_DIR, 'output')
+from_email = "noreply@azteam.cn"
+from_password = "Zlk939067"
 
 # 确保目录存在
 os.makedirs(REPO_DIR, exist_ok=True)
@@ -64,8 +68,17 @@ def index():
         # 处理表单数据
         git_url = request.form['git_url']
         main_file = request.form['main_file']
+        email = request.form['email']
         single_file = request.form.get('single_file', False)
+        if single_file == "false":
+            single_file = False
+        else:
+            single_file = True
         no_console = request.form.get('no_console', False)
+        if no_console == "false":
+            no_console = False
+        else:
+            no_console = True
         icon_path = request.form.get('icon_path', None)
         requirements_path = request.form.get('requirements_path', None)
         resource_folder = request.form.get('resource_folder', None)
@@ -80,14 +93,31 @@ def index():
         custom_args = request.form.get('custom_args', None)
         
         # 启动打包线程
-        threading.Thread(target=package_project, args=(git_url, main_file, single_file, no_console, icon_path, requirements_path, resource_folder, plugins, windows_file_description, windows_file_version, windows_product_version, windows_product_name, windows_company_name, include_package, include_module, custom_args)).start()
+        threading.Thread(target=package_project, args=(git_url, main_file, email, single_file, no_console, icon_path, requirements_path, resource_folder, plugins, windows_file_description, windows_file_version, windows_product_version, windows_product_name, windows_company_name, include_package, include_module, custom_args)).start()
         return jsonify({"message": "打包开始"})
     return render_template('index.html')
 
-def package_project(git_url, main_file, single_file, no_console, icon_path, requirements_path, resource_folder, plugins, windows_file_description, windows_file_version, windows_product_version, windows_product_name, windows_company_name, include_package, include_module, custom_args):
-    # 解析自定义参数
-    custom_args_list = custom_args.split(',') if custom_args else []
-    # 构建 Nuitka 命令
+def package_project(git_url, main_file, email, single_file, no_console, icon_path, requirements_path, resource_folder, plugins, windows_file_description, windows_file_version, windows_product_version, windows_product_name, windows_company_name, include_package, include_module, custom_args):
+    unique_id = str(uuid.uuid4())
+    project_path = os.path.join(REPO_DIR, unique_id)
+    output_path = os.path.join(OUTPUT_DIR, f"{unique_id}.zip")
+
+    # Clone the repository
+    git_clone_cmd = f"git clone {git_url} {project_path}"
+    proc = subprocess.Popen(git_clone_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    proc.wait()
+
+    if proc.returncode != 0:
+        print('Git clone failed.')
+        return
+
+    os.chdir(project_path)
+    if requirements_path:
+        pip_install_cmd = f"pip install -r {requirements_path}"
+        proc = subprocess.Popen(pip_install_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        proc.wait()
+
+    # Build the Nuitka command
     nuitka_cmd = "nuitka --standalone"
     if single_file:
         nuitka_cmd += " --onefile"
@@ -107,55 +137,84 @@ def package_project(git_url, main_file, single_file, no_console, icon_path, requ
     if windows_company_name:
         nuitka_cmd += f' --windows-company-name="{windows_company_name}"'
     if plugins:
-        nuitka_cmd += f"--plugin-enable={plugins}"
+        nuitka_cmd += f" --plugin-enable={plugins}"
     for package in include_package.split(','):
         if package:
             nuitka_cmd += f" --include-package={package}"
     for module in include_module.split(','):
         if module:
             nuitka_cmd += f" --include-module={module}"
-    # 添加自定义参数
-    for arg in custom_args_list:
-        nuitka_cmd += f" {arg}"
+    for arg in custom_args.split(','):
+        if arg:
+            nuitka_cmd += f" {arg}"
     nuitka_cmd += f" {main_file}"
-    # 执行命令
-    unique_id = str(uuid.uuid4())
-    project_path = os.path.join(REPO_DIR, unique_id)
-    output_path = os.path.join(OUTPUT_DIR, f"{unique_id}.zip")
 
-    os.system(f"git clone {git_url} {project_path}")
-    os.chdir(project_path)
-    if requirements_path:
-        os.system(f"pip install -r {requirements_path}")
-    print(nuitka_cmd)
+    # Execute the Nuitka command
     proc = subprocess.Popen(nuitka_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    while True:
-        output = proc.stdout.readline()
-        if output == b'':  # Check for binary empty string
-            if proc.poll() is not None:
-                break
-        else:
-            # Decode with 'ignore' to handle undecodable bytes
-            decoded_output = output.decode('utf-8', 'ignore')
-            socketio.emit('output', {'data': decoded_output}, namespace='/test')
     proc.wait()
-    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk('dist'):
-            for file in files:
-                zipf.write(os.path.join(root, file))
+
+    if proc.returncode == 0:
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk('dist'):
+                for file in files:
+                    zipf.write(os.path.join(root, file))
+        send_email(email, f'http://admin.v6.server.tjmtr.world:5000/download/{unique_id}.zip', unique_id)
+    else:
+        print('Nuitka build failed.')
+
     os.chdir("..")
-    os.system(f"rm -rf {project_path}")
-    socketio.emit('done', {'url': f'/download/{unique_id}.zip'}, namespace='/test')
+    
+def send_email(to_email, download_link, unique_id):
+    global from_email, from_password
+    subject = f"打包任务完成通知"
+    body = f"你的打包任务({unique_id})已完成。 你可以通过这个链接下载: {download_link}"
+
+    msg = MIMEMultipart()
+    msg['From'] = from_email
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        server = smtplib.SMTP('smtp.office365.com', 587)
+        server.starttls()
+        server.login(from_email, from_password)
+        server.sendmail(from_email, to_email, msg.as_string())
+        server.quit()
+        print(f"Email sent to {to_email}")
+    except Exception as e:
+        print(f"Failed to send email. Error: {e}")
 
 @app.route('/download/<path:filename>', methods=['GET'])
 def download(filename):
-    return send_from_directory(directory=OUTPUT_DIR, filename=filename, as_attachment=True)
+    try:
+        return send_from_directory(OUTPUT_DIR, filename, as_attachment=True)
+    except Exception as e:
+        print(f"Error sending file: {e}")
+        return "File not found", 404
 
 def clear_files():
-    if os.path.exists('project.zip'):
-        os.remove('project.zip')
-    if os.path.exists('project'):
-        os.system('rm -rf project')
+    # 清除 OUTPUT_DIR 中的所有文件
+    for filename in os.listdir(OUTPUT_DIR):
+        file_path = os.path.join(OUTPUT_DIR, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)  # 删除文件或符号链接
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)  # 删除目录及其内容
+        except Exception as e:
+            print(f'Failed to delete {file_path}. Reason: {e}')
+
+    # 清除 REPO_DIR 中的所有文件
+    for filename in os.listdir(REPO_DIR):
+        file_path = os.path.join(REPO_DIR, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print(f'Failed to delete {file_path}. Reason: {e}')
 
 schedule.every().friday.do(clear_files)
 
@@ -167,4 +226,4 @@ def run_scheduler():
 if __name__ == '__main__':
     # 启动定时任务线程
     threading.Thread(target=run_scheduler).start()
-    socketio.run(app, port=5000, debug=True) 
+    app.run(host='0.0.0.0', port=5000, debug=True) 

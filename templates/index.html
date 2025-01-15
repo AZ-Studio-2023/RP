@@ -3,19 +3,8 @@
 <head>
     <title>Nuitka 打包服务</title>
     <link href="https://gcore.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <script src="https://gcore.jsdelivr.net/npm/socket.io@4.0.0/client-dist/socket.io.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + '/test');
-            socket.on('output', function(data) {
-                var logElement = document.getElementById('log');
-                logElement.innerHTML += data.data + '<br>';
-                logElement.scrollTop = logElement.scrollHeight;  // 自动滚动到底部
-            });
-            socket.on('done', function(data) {
-                document.getElementById('log').innerHTML += '<a href="' + data.url + '">下载打包文件</a>';
-            });
-
             // Load saved form data
             document.querySelectorAll('input[type="text"], input[type="radio"]').forEach(input => {
                 const savedValue = localStorage.getItem(input.name);
@@ -45,6 +34,9 @@
                 document.querySelectorAll('input[type="text"], input[type="radio"]:checked').forEach(input => {
                     localStorage.setItem(input.name, input.value);
                 });
+
+                // Disable the submit button
+                document.querySelector('button[type="submit"]').disabled = true;
             });
         });
     </script>
@@ -60,6 +52,10 @@
             <div>
                 <label class="block text-gray-700">主文件:</label>
                 <input type="text" name="main_file" class="w-full mt-1 p-2 border rounded" required>
+            </div>
+            <div>
+                <label class="block text-gray-700">电子邮箱:</label>
+                <input type="email" name="email" class="w-full mt-1 p-2 border rounded" required>
             </div>
             <div>
                 <label class="block text-gray-700">是否打包为单文件:</label>
